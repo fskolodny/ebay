@@ -11,6 +11,7 @@
                #:mito
                )
   :components (
+	       (:file "models")
 	       (:file "arele")
                )
   )
