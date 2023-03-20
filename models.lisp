@@ -1,8 +1,6 @@
 (in-package :cl-user)
 (defpackage #:models
   (:use #:cl
-	#:mito
-	#:sxql
 	)
   (:export initialize-models
 	   add-investor add-inventory-item add-listing add-purchase add-remittance add-sale
@@ -14,188 +12,177 @@
 	   update-shipping
 	   object-id
 	   investor-name investor-percentage
-	   item-description
+	   item-code item-description
 	   purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand purchase-price
 	   listing-purchase listing-date listing-quantity listing-price
 	   sale-listing sale-date sale-quantity sale-price sale-fees sale-shipping sale-customer
 	   remittance-investor remittance-date remittance-amount
-	   get-max-on-hand-for-item
-	   get-first-purchase-with-enough
 	   get-total-remittances-for-investor
+	   execute
 	   )
   )
 
 (in-package :models)
 
-(deftable investor ()
-  ((name :col-type (:varchar 128))
-   (percentage :col-type :smallint))
-  (:table-name "investors")
+(defvar *log*)
+(defvar *investors* nil)
+(defvar *items* nil)
+(defvar *purchases* nil)
+(defvar *purchase-items* nil)
+(defvar *listings* nil)
+(defvar *sales* nil)
+(defvar *remittances* nil)
+
+(defun execute (function &rest args)
+  (eval (cons function args))
+  (clobber:log-transaction (cons function args) *log*)
+  )
+(defclass investor ()
+  ((name :type string :accessor investor-name :initarg :name)
+   (percentage :type integer :accessor investor-percentage :initarg :percentage)
+   (purchases :type list :accessor investor-purchases :initform (list))
+   )
   )
 
-(deftable item ()
-  ((description :col-type (:varchar 128))
+(defclass item ()
+  ((code :type string :accessor item-code :initarg :code)
+   (description :type string :accessor item-description :initarg :description)
+   (purchases :type list :accessor item-purchases :initform (list))
    )
-  (:table-name "inventory")
   )
 
-(deftable purchase ()
-  ((investor :col-type investor)
-   (item :col-type item)
-   (date :col-type :datetime)
-   (quantity :col-type :integer)
-   (on-hand :col-type :integer)
-   (price :col-type :integer)
+(defclass purchase ()
+  ((investor :type investor :accessor purchase-investor :initarg :investor)
+   (date :type date :accessor purchase-date :initarg :date)
    )
-  (:table-name "purchases")
+  )
+(defclass purchase-item ()
+  (
+   (item :type item :accessor purchase-item :initarg :item)
+   (quantity :type :integer :accessor purchase-quantity :initarg :quantity)
+   (on-hand :type :integer :accessor purchase-on-hand :initarg :on-hand)
+   (price :type rational :accessor purchase-price :initarg :price)
+   )
   )
 
-(deftable listing ()
-  ((purchase :col-type purchase)
-   (date :col-type :datetime)
-   (quantity :col-type :integer)
-   (price :col-type :integer)
+(defclass listing ()
+  ((item :type item :accessor listing-item :initarg :item)
+   (date :type :date :accessor listing-date :initarg :date)
+   (quantity :type integer :accessor listing-quantity :initarg :quantity)
+   (price :type rational :accessor listing-price :initarg :price)
    )
-  (:table-name "listings")
   )
 
-(deftable sale ()
-  ((listing :col-type listing)
-   (date :col-type :datetime)
-   (quantity :col-type :integer)
-   (price :col-type :integer)
-   (fees :col-type :integer)
-   (shipping :col-type :integer)
-   (customer :col-type (:varchar 128))
+(defclass sale ()
+  ((listing :type listing :accessor sale-listing :initarg :listing)
+   (date :type date :accessor sale-date :initarg :date)
+   (quantity :type integer :accessor sale-quantity :initarg :quantity)
+   (price :type rational :accessor sale-price :initarg :price)
+   (fees :type rational :accessor sale-fees :initarg :fees)
+   (shipping :type rational :accessor sale-shipping :initarg :shipping)
+   (customer :type string :accessor sale-customer :initarg :customer)
+   (purchases :type list :accessor sale-purchases :initform (list))
    )
-  (:table-name "sales")
   )
 
-(deftable remittance ()
-  ((investor :col-type investor)
-   (date :col-type :datetime)
-   (amount :col-type :integer)
+(defclass remittance ()
+  ((investor :type investor :accessor remittance-investor :initarg :investor)
+   (date :type date :accessor remittance-date :initarg :date)
+   (amount :type rational :accessor remittance-amount :initarg :amount)
    )
-  (:table-name "remittances")
   )
 
 (defun initialize-models ()
-  (connect-toplevel :sqlite3 :database-name "arele.db")
-  (mapc (lambda (model)
-	  (ensure-table-exists model)
-	  )
-	'(investor item purchase listing sale remittance)
-	)
+  (setf *log* (clobber:open-transaction-log "arele.log"
+					    (lambda (tran) (eval tran))
+					    )
+	sb-ext:*exit-hooks* (push
+			     (lambda () (clobber:close-transaction-log *log*))
+			     sb-ext:*exit-hooks*))
+  (mito:connect-toplevel :sqlite3 :database-name "arele.db")
+;  (mapc (lambda (model)
+;	  (ensure-table-exists model)
+;	  )
+;	'(investor item purchase listing sale remittance)
+;	)
   )
 
 (defun add-investor (&key name percentage)
-  (create-dao 'investor :name name :percentage percentage)
+  (setf *investors* (append *investors* (list (make-instance 'investor :name name :percentage percentage))))
   )
 
-(defun add-inventory-item (&key description &allow-other-keys)
-  (create-dao 'item :description description)
+(defun add-inventory-item (&key code description &allow-other-keys)
+  (setf *items* (append *items* (list (make-instance 'item :code code :description description))))
   )
 
-(defun add-purchase (&key item date quantity price investor &allow-other-keys)
-  (create-dao 'purchase :item (find-dao 'item :id item) :date date :quantity quantity
-			:on-hand quantity :price price :investor (find-dao 'investor :id investor))
+(defun add-purchase (&key date investor &allow-other-keys)
+  (setf *purchases* (append *purchases* (list (make-instance 'purchase :date date :investor (nth (1- investor) *investors*)))))
   )
 
-(defun add-listing (&key purchase date quantity price &allow-other-keys)
-  (let ((p (find-dao 'purchase :id purchase))
-	)
-    (setf (purchase-on-hand p) (- (purchase-on-hand p) quantity))
-    (update-dao p)
-    (create-dao 'listing :purchase p :date date :quantity quantity :price price)
-    )
+(defun add-purchase-item (&key purchase item quantity price &allow-other-keys)
+  (setf *purchase-items* (append *purchase-items* (list (make-instance 'purchase-item :purchase purchase :item (nth (1- item) *items*)
+										      :quantity quantity :price price))))
+  )
+
+(defun add-listing (&key item date quantity price)
+  (setf *listings* (append *listings* (list (make-instance 'listing :item item :date date :quantity quantity :price price))))
   )
 
 (defun add-sale (&key listing date quantity price fees shipping customer)
-  (let ((l (get-listing listing))
-	)
-    (setf (listing-quantity l) (- (listing-quantity l) quantity))
-    (create-dao 'sale :listing l :date date :quantity quantity :price price :fees fees :shipping shipping :customer customer)
-    (update-dao l)
-    )
+  (setf (listing-quantity listing) (- (listing-quantity listing) quantity))
+  (setf *sales* (append *sales* (list (make-instance 'sale :listing listing :date date :quantity quantity :price price :fees fees :shipping shipping :customer customer))))
   )
 
 (defun update-shipping (&key sale shipping &allow-other-keys)
-  (let ((s (find-dao 'sale :id sale))
-	)
-    (setf (sale-shipping s) shipping)
-    (update-dao s)
-    )
+  (setf (sale-shipping sale) shipping)
   )
 
 (defun add-remittance (&key investor date amount &allow-other-keys)
-  (create-dao 'remittance :investor (find-dao 'investor :id investor) :date date :amount amount)
+  (setf *remittances* (append *remittances* (list (make-instance 'remittance :investor investor :date date :amount amount))))
   )
 
 (defun get-investors ()
-  (retrieve-dao 'investor)
+  *investors*
   )
 
 (defun get-items ()
-  (retrieve-dao 'item)
+  *items*
   )
 
 (defun get-listings ()
-  (retrieve-dao 'listing)
+  *listings*
   )
 
 (defun get-purchases ()
-  (retrieve-dao 'purchase)
+  *purchases*
   )
 
 (defun get-sales ()
-  (retrieve-dao 'sale)
+  *sales*
   )
 
 (defun get-investor (id)
-  (find-dao 'investor :id id)
+  (nth (1- id) *investors*)
   )
 
 (defun get-listing (id)
-  (if (or (typep id 'string) (typep id 'number))
-      (find-dao 'listing :id id)
-      id)
+  (nth (1- id) *listings*)
   )
 
 (defun get-sale (id)
-  (find-dao 'sale :id id)
+  (nth (1- id) *sales*)
   )
 
 (defun get-purchases-for-investor (investor)
-  (select-dao 'purchase (where (:= :investor_id (if (typep investor 'number) investor (object-id investor)))))
-  )
-
-(defun get-listings-for-purchase (purchase)
-  (select-dao 'listing (where (:= :purchase_id (if (typep purchase 'number) purchase (object-id purchase)))))
+  (remove-if-not (lambda (i) (equal i investor)) *purchases* :key 'purchase-investor)
   )
 
 (defun get-sales-for-listing (listing)
-  (select-dao 'sale (where (:= :listing_id (if (typep listing 'number) listing (object-id listing)))))
-  )
-
-(defun get-max-on-hand-for-item (item)
-  (or (getf (first (retrieve-by-sql (select (fields (:as (:max :on_hand) :on-hand))
-				      (from :purchases)
-				      (where (:= :item_id item)))))
-	    :on-hand)
-      0)
-  )
-
-(defun get-first-purchase-with-enough (item quantity)
-  (let ((purchase (first (select-dao 'purchase
-			   (where (:and (:= :item_id item) (:>= :on_hand quantity)))
-			   (order-by :date))))
-	)
-    (and purchase (object-id purchase))
-    )
+  (remove-if-not (lambda (l) (equal l listing)) *sales* :key 'sale-listing)
   )
 
 (defun get-total-remittances-for-investor (investor)
   (reduce (lambda (a b) (+ a b))
-	  (select-dao 'remittance (where (:= :investor_id (if (typep investor 'number) investor (object-id investor)))))
+	  (remove-if-not (lambda (i) (equal investor i)) *remittances* :key 'remittance-investor)
 	  :key 'remittance-amount :initial-value 0)
   )

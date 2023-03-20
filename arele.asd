@@ -8,7 +8,11 @@
   :entry-point "arele:start-app"
   :depends-on (
 	       #:clog
+	       #:clobber
+	       #:dexador
                #:mito
+	       #:alexandria
+	       #:json
                )
   :components (
 	       (:file "models")

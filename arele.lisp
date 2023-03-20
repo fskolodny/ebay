@@ -2,17 +2,62 @@
   (:use #:cl
 	#:clog
 	#:clog-gui
-	#:models
+	#:clobber
 	#:local-time
 	)
-  (:export start-app))
+  )
 
 (in-package :arele)
+
+(export '(start-app get-ebay-authorization-code *acceptor*))
+(shadow '(initialize-models
+	   add-investor add-inventory-item add-listing add-purchase add-remittance add-sale
+	   get-investors get-items get-listings get-purchases get-remittances get-sales
+	   get-investor get-listing get-sale
+	   get-purchases-for-investor
+	   get-listings-for-purchase
+	   get-sales-for-listing
+	   update-shipping
+	   object-id
+	   investor-name investor-percentage
+	   item-code item-description
+	   purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand purchase-price
+	   listing-purchase listing-date listing-quantity listing-price
+	   sale-listing sale-date sale-quantity sale-price sale-fees sale-shipping sale-customer
+	   remittance-investor remittance-date remittance-amount
+	   get-total-remittances-for-investor
+	   execute))
+(use-package '(models))
+
+(defvar *acceptor* (make-instance 'hunchentoot:easy-ssl-acceptor :port 8080 :ssl-privatekey-password "abcd" :ssl-privatekey-file #p"~/desktop.com.key" :ssl-certificate-file #p"~/desktop.com.crt"))
+
+(defstruct auth-code
+  code
+  expiration
+  )
+(defvar *authorizations* `((:sandbox ((:authorize-url "https://auth.sandbox.ebay.com/oauth2/authorize?client_id=FilaKolo-SellingF-SBX-a755ec4ee-0182f5cf&response_type=code&redirect_uri=Fila_Kolodny-FilaKolo-Sellin-drmiwop&scope=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.order.readonly https://api.ebay.com/oauth/api_scope/buy.guest.order https://api.ebay.com/oauth/api_scope/sell.marketing.readonly https://api.ebay.com/oauth/api_scope/sell.marketing https://api.ebay.com/oauth/api_scope/sell.inventory.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.analytics.readonly https://api.ebay.com/oauth/api_scope/sell.marketplace.insights.readonly https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly https://api.ebay.com/oauth/api_scope/buy.shopping.cart https://api.ebay.com/oauth/api_scope/buy.offer.auction https://api.ebay.com/oauth/api_scope/commerce.identity.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.email.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.phone.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.address.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.name.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.status.readonly https://api.ebay.com/oauth/api_scope/sell.finances https://api.ebay.com/oauth/api_scope/sell.item.draft https://api.ebay.com/oauth/api_scope/sell.payment.dispute https://api.ebay.com/oauth/api_scope/sell.item https://api.ebay.com/oauth/api_scope/sell.reputation https://api.ebay.com/oauth/api_scope/sell.reputation.readonly https://api.ebay.com/oauth/api_scope/commerce.notification.subscription https://api.ebay.com/oauth/api_scope/commerce.notification.subscription.readonly")
+				      ,(list :consent-code) ,(list :refresh-code) ,(list :auth-code)
+				      (:exchange-url . "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
+				      (:refresh-url . "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
+				      (:app-id . "FilaKolo-SellingF-SBX-a755ec4ee-0182f5cf")
+				      (:secret . "SBX-755ec4ee910c-fae8-40c5-af55-5436")
+				      (:redirect-uri . "Fila_Kolodny-FilaKolo-Sellin-drmiwop")
+				      ))
+			   (:production ((:authorize-url "https://auth.ebay.com/oauth2/authorize?client_id=FilaKolo-SellingF-PRD-f75719fb7-f015cf08&response_type=code&redirect_uri=Fila_Kolodny-FilaKolo-Sellin-wtzukf&scope=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.marketing.readonly https://api.ebay.com/oauth/api_scope/sell.marketing https://api.ebay.com/oauth/api_scope/sell.inventory.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.analytics.readonly https://api.ebay.com/oauth/api_scope/sell.finances https://api.ebay.com/oauth/api_scope/sell.payment.dispute https://api.ebay.com/oauth/api_scope/commerce.identity.readonly https://api.ebay.com/oauth/api_scope/commerce.notification.subscription https://api.ebay.com/oauth/api_scope/commerce.notification.subscription.readonly")
+					 ,(list :consent-code) ,(list :refresh-code) ,(list :auth-code)
+					 (:exchange-url . "https://api.ebay.com/identity/v1/oauth2/token")
+					 (:refresh-url . "https://api.ebay.com/identity/v1/oauth2/token")
+					 (:app-id . "FilaKolo-SellingF-PRD-f75719fb7-f015cf08")
+					 (:secret . "PRD-75719fb72196-9187-48f7-8d79-92cd")
+					 (:redirect-uri . "Fila_Kolodny-FilaKolo-Sellin-wtzukf")
+					 ))
+			   )
+  )
 
 (defun to-dollar (value)
   (multiple-value-bind (x result) (ppcre:scan-to-strings "(\\d+)(.(\\d{2}))?" value)
     (declare (ignore x))
-    (+ (* 100 (parse-integer (or (aref result 0) "0"))) (parse-integer (or (aref result 2) "0")))
+    (/ (+ (* 100 (parse-integer (or (aref result 0) "0"))) (parse-integer (or (aref result 2) "0"))) 100)
     )
   )
 
@@ -24,7 +69,7 @@
   (let* ((app (connection-data-item obj "app-data"))
          (win (create-gui-window obj :title "Investors"))
          (panel (create-div (window-content win)))
-	 (slots '(:id :name :percentage))
+	 (slots '(:name :percentage))
 	 )
     (declare (ignorable app))
     (with-clog-create panel
@@ -43,7 +88,6 @@
 	      (with-clog-create tb
 		  (table-row (:bind tr)
 			     )
-		(create-table-column tr :content (object-id investor))
 		(create-table-column tr :content (investor-name investor))
 		(create-table-column tr :content (investor-percentage investor) :style "text-align: right")
 		)
@@ -105,7 +149,7 @@
   (let* ((app (connection-data-item obj "app-data"))
 	 (win (create-gui-window obj :title "Inventory"))
 	 (inventory (create-div (window-content win)))
-	 (slots '(:id :description))
+	 (slots '(:code :description))
 	 )
     (declare (ignorable app inventory))
     (with-clog-create inventory
@@ -124,7 +168,7 @@
 	      (with-clog-create tb
 		  (table-row (:bind tr)
 			     )
-		(create-table-column tr :content (object-id item))
+		(create-table-column tr :content (item-code item))
 		(create-table-column tr :content (item-description item))
 		)
 	      )
@@ -146,6 +190,10 @@
 			(table ()
 			       (table-body ()
 					   (table-row ()
+						      (table-column () (label (:content "Code")))
+						      (table-column () (form-element (:bind code :text)))
+						      )
+					   (table-row ()
 						      (table-column () (label (:content "Description")))
 						      (table-column () (form-element (:bind description :text)))
 						      )
@@ -157,10 +205,13 @@
 			       )
 			)
 	      )
-      (setf (attribute description :requiredp) t)
+      (setf (attribute description :requiredp) t
+	    (attribute code :requiredp) t
+	    (autofocusp code) t
+	    )
       (set-on-submit f1 (lambda (obj)
 			  (declare (ignore obj))
-			  (add-inventory-item :description (value description))
+			  (add-inventory-item :code (value code) :description (value description))
 			  (reset f1)
 			  )
 		     )
@@ -172,7 +223,7 @@
   (let* ((app (connection-data-item obj "app-data"))
 	 (win (create-gui-window obj :title "Purchases" :width 600))
 	 (purchases (create-div (window-content win)))
-	 (slots '(:id :investor :item :date :quantity :on-hand))
+	 (slots '(:investor :item :date :quantity :on-hand))
 	 (dollar-slots '(:price))
 	 )
     (declare (ignorable app purchases))
@@ -196,7 +247,6 @@
 	      (with-clog-create tb
 		  (table-row (:bind tr)
 			     )
-		(create-table-column tr :content (object-id purchase))
 		(create-table-column tr :content (investor-name (purchase-investor purchase)))
 		(create-table-column tr :content (item-description (purchase-item purchase)))
 		(create-table-column tr :content (format-rfc3339-timestring nil (purchase-date purchase) :omit-time-part t))
@@ -213,7 +263,7 @@
 
 (defun on-add-purchase (obj)
   (let* ((app (connection-data-item obj "app-data"))
-	 (win (create-gui-window obj :title "Add Purchase" :height 600))
+	 (win (create-gui-window obj :title "Add Purchase" :height 400 :width 600))
 	 (panel (create-div (window-content win)))
 	 )
     (declare (ignorable app))
@@ -251,11 +301,11 @@
 		   )
 	     )
       (mapcar (lambda (i)
-		(add-select-option item (object-id i) (item-description i)))
+		(add-select-option item (item-code i) (item-description i)))
 	      (get-items)
 	      )
       (mapcar (lambda (i)
-		(add-select-option investor (object-id i) (investor-name i)))
+		(add-select-option investor (investor-name i) (investor-name i)))
 	      (get-investors)
 	      )
       (setf (attribute price :pattern) "\\d+([.]\\d\\d)?"
@@ -273,7 +323,7 @@
 		       (add-purchase :item (value item)
 				     :date (value date) :quantity (value quantity) :price (to-dollar (value price))
 				     :investor (value investor))
-		       (setf (attribute f1 :hidden) t)
+		       (reset f1)
 		       )
 		     )
       )
@@ -284,7 +334,7 @@
   (let* ((app (connection-data-item obj "app-data"))
 	 (win (create-gui-window obj :title "Listings" :width 1200))
 	 (listings (create-div (window-content win)))
-	 (slots '(:id :item :investor :date :quantity))
+	 (slots '(:item :investor :date :quantity))
 	 (dollar-slots '(:price))
 	 )
     (declare (ignorable app))
@@ -308,7 +358,6 @@
 	      (with-clog-create tb
 		  (table-row (:bind tr)
 			     )
-		(create-table-column tr :content (object-id listing))
 		(let ((purchase (listing-purchase listing))
 		      )
 		  (create-table-column tr :content (item-description (purchase-item purchase)))
@@ -361,7 +410,7 @@
 		   )
 	     )
       (mapcar (lambda (i)
-		(add-select-option item (object-id i) (item-description i)))
+		(add-select-option item (item-code i) (item-description i)))
 	      (get-items)
 	      )
       (setf (attribute price :pattern) "\\d+(.\d\d)?"
@@ -403,7 +452,7 @@
   (let* ((app (connection-data-item obj "app-data"))
 	 (win (create-gui-window obj :title "Sales" :width 1200))
 	 (panel (create-div (window-content win)))
-	 (slots '(:id :date :quantity :customer :investor :item))
+	 (slots '(:date :quantity :customer :investor :item))
 	 (dollar-slots '(:price :fees :shipping))
 	 )
     (declare (ignorable app))
@@ -427,7 +476,6 @@
 	      (with-clog-create tb
 		  (table-row (:bind tr)
 			     )
-		(create-table-column tr :content (object-id sale))
 		(create-table-column tr :content (format-rfc3339-timestring nil (sale-date sale) :omit-time-part t))
 		(create-table-column tr :content (sale-quantity sale) :style "text-align: right")
 		(create-table-column tr :content (sale-customer sale))
@@ -491,7 +539,7 @@
 	      )
       (declare (ignorable date quantity price fees shipping customer))
       (mapc (lambda (l)
-	      (add-select-option listing (object-id l)
+	      (add-select-option listing 1
 				 (format nil "~a ~a ~a" (format-rfc3339-timestring t (listing-date l) :omit-time-part t) (item-description (purchase-item (listing-purchase l))) (listing-quantity l)))
 	      )
 	    (remove-if #'zerop (get-listings) :key 'listing-quantity)
@@ -556,7 +604,7 @@
 		     )
 	      )
       (mapc (lambda (s)
-	      (add-select-option sale (object-id s) (format nil "~a ~a ~a" (format-rfc3339-timestring nil (sale-date s) :omit-time-part t)
+	      (add-select-option sale 1 (format nil "~a ~a ~a" (format-rfc3339-timestring nil (sale-date s) :omit-time-part t)
 							    (item-description (purchase-item (listing-purchase (sale-listing s)))) (sale-quantity s)))
 	      )
 	    (get-sales)
@@ -667,7 +715,7 @@
 		     )
 	      )
       (mapc (lambda (i)
-	      (add-select-option investor (object-id i) (investor-name i))
+	      (add-select-option investor (investor-name i) (investor-name i))
 	      )
 	    (get-investors)
 	    )
@@ -755,10 +803,74 @@
       )
     )
   )
+(defun get-ebay-authorization-code (&key (sandbox t))
+  (let ((auth (second (assoc (if sandbox :sandbox :production) *authorizations*)))
+	)
+    (print auth)
+    (terpri)
+    (finish-output)
+    (hunchentoot:define-easy-handler
+	(accept-authorization :uri (lambda (&rest args)
+				     (declare (ignorable args))
+				     t
+				     ))
+	(code (expires-in :real-name "expires_in" :parameter-type 'integer))
+      (format t "code=~a expires-in=~a" code expires-in)
+      (terpri)
+      (setf (cdr (assoc :consent-code auth)) (make-auth-code :code code :expiration (timestamp+ (now) expires-in :sec)))
+      (multiple-value-bind (body status headers uri stream)
+	  (dexador:post (cdr (assoc :exchange-url auth))
+			:basic-auth `(,(cdr (assoc :app-id auth)) . ,(cdr (assoc :secret auth)))
+			:content `(("grant_type" . "authorization_code")
+				   ("redirect_uri" . ,(cdr (assoc :redirect-uri auth)))
+				   ("code" . ,(quri:url-decode code))
+				   )
+			)
+	(declare (ignorable uri stream))
+	(let ((*print-pretty* t)
+	      (json-obj (json:json-decode body))
+	      )
+	  (print status)
+	  (print (alexandria:hash-table-alist headers))
+	  (print body)
+	  (terpri)
+	  (finish-output)
+	  (setf (cdr (assoc :auth-code auth)) (make-auth-code :code (json:json-getf json-obj "access_token") :expiration (timestamp+ (now) (json:json-getf json-obj "expires_in") :sec))
+		(cdr (assoc :refresh-code auth)) (make-auth-code :code (json:json-getf json-obj "refresh_token") :expiration (timestamp+ (now) (json:json-getf json-obj "refresh_token_expires_in") :sec))
+		)
+	  )
+	)
+      "<body><h3>You can close this window</h3></body>"
+      )
+    (hunchentoot:start *acceptor*)
+    (uiop:run-program (format nil "xdg-open '~a'" (second (assoc :authorize-url auth))))
+    )
+  )
 
 (defun start-app ()
-  (initialize-models)
+  (models:initialize-models)
   (initialize 'on-new-window
-   :static-root (merge-pathnames "./www/"
-				 (asdf:system-source-directory :arele)))
-  (open-browser))
+	      :static-root (merge-pathnames "./www/"
+					    (asdf:system-source-directory :arele)))
+  (open-browser)
+  )
+
+(defun convert-to-clobber ()
+  (let ((investors (dbi:execute "select name, percentage from investors"))
+	(inventory (dbi:execute "select code, description from inventory"))
+	(purchases (let ((purchases-hash (make-hash-table :test 'equalp))
+			 (a (list))
+			 )
+		     (mapc (lambda (row)
+			     (setf (gethash (cons (getf row :investor-id) (getf row :date)) purchases-hash) t))
+			   (dbi:execute "select investor_id, date from purchases"))
+		     (maphash
+		      (lambda (k v)
+			(declare (ignorable v))
+			(setf a (push k a)))
+		      purchases-hash)
+		     a))
+	(purchase-items (mito:retrieve-by-sql (sxql:select (sxql:fields :investor_id :date) (sxql:from :purchases))))
+	)
+    )
+  )
