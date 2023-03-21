@@ -809,79 +809,73 @@
   )
 (defvar *dl*)
 (defvar *ul*)
+(defun create-compact-dl (obj)
+  (create-child obj "<dl compact></dl>" :clog-type 'clog:clog-definition-list)
+  )
 (defun on-ebay-inventory (obj)
   (let* ((win (create-gui-window obj :maximize t :title "EBay inventory"))
 	 (panel (create-div (window-content win)))
 	 (json-obj (get-ebay-inventory-items))
+	 (dl (create-compact-dl panel))
 	)
-    (with-clog-create panel
-	(definition-list (:bind dl))
-      (let ((*dl* dl))
-	(labels ((field-to-definition (field)
-		   (let ((term (create-term *dl* :content (first field)))
-			 (desc (create-description *dl*))
-			 (val (second field))
-			 )
-		     (declare (ignore term))
-		     (etypecase val
-		       (json-object
-			(let ((*dl* (create-definition-list desc))
-			      )
-			  (setf (attribute *dl* :compact) t)
-			  (mapc #'field-to-definition (json-object-members val))
-			  )
-			)
-		       (list
-			(with-clog-create desc
-			    (ordered-list (:bind ul))
-			  (let ((*ul* ul))
-			    (setf (attribute *ul* :compact) t)
-			    (mapc #'item-to-list-item val)
-			    )
-			  )
-			)
-		       (t
-			(setf (text desc) val)
-			)
+    (let ((*dl* dl))
+      (labels ((field-to-definition (field)
+		 (let ((term (create-term *dl* :content (first field)))
+		       (desc (create-description *dl*))
+		       (val (second field))
 		       )
-		     )
-		   )
-		 (item-to-list-item (item)
-		   (with-clog-create *ul*
-		       (list-item (:bind li))
-		     (etypecase item
-		       (list
-			(with-clog-create li
-			    (ordered-list (:bind ul))
-			  (let ((*ul* ul))
-			    (setf (attribute *ul* :compact) t)
-			    (mapc #'item-to-list-item item)
+		   (declare (ignore term))
+		   (etypecase val
+		     (json-object
+		      (let ((*dl* (create-compact-dl desc))
 			    )
+			(mapc #'field-to-definition (json-object-members val))
+			)
+		      )
+		     (list
+		      (with-clog-create desc
+			  (ordered-list (:bind ul))
+			(let ((*ul* ul))
+			  (mapc #'item-to-list-item val)
 			  )
 			)
-		       (json-object
-			(with-clog-create li
-			    (definition-list (:bind dl))
-			  (let ((*dl* dl))
-			    (setf (attribute *dl* :compact) t)
-			    (mapc #'field-to-definition (json-object-members item))
-			    )
-			  )
-			)
-		       (t
-			(setf (text li) item)
-			)
-		       )
+		      )
+		     (t
+		      (setf (text desc) val)
+		      )
 		     )
 		   )
 		 )
-	  (setf (attribute *dl* :compact) t)
-	  (mapc #'field-to-definition (json-object-members json-obj))
-	  )
+	       (item-to-list-item (item)
+		 (with-clog-create *ul*
+		     (list-item (:bind li))
+		   (etypecase item
+		     (list
+		      (with-clog-create li
+			  (ordered-list (:bind ul))
+			(let ((*ul* ul))
+			  (mapc #'item-to-list-item item)
+			  )
+			)
+		      )
+		     (json-object
+		      (let ((*dl* (create-compact-dl li)))
+			(mapc #'field-to-definition (json-object-members item))
+			)
+		      )
+		     (t
+		      (setf (text li) item)
+		      )
+		     )
+		   )
+		 )
+	       )
+	(mapc #'field-to-definition (json-object-members json-obj))
 	)
       )
     )
   )
+
 (defun refresh-ebay-auth-code ()
   (multiple-value-bind (body status headers uri stream)
       (dexador:get (second (assoc :refresh-url *current-auth*))
@@ -900,6 +894,7 @@
     )
   )
 (defun get-ebay-inventory-items (&key (sandbox t))
+  (setf *current-auth* (second (assoc (if sandbox :sandbox :production) *authorizations*)))
   (if (or (null *current-auth*) (null (cdr (assoc :auth-code *current-auth*))))
       (get-ebay-authorization-code :sandbox sandbox))
   (let ((auth-code (cdr (assoc :auth-code *current-auth*)))
