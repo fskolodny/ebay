@@ -93,18 +93,12 @@
   )
 
 (defun initialize-models ()
-  (setf *log* (clobber:open-transaction-log "arele.log"
-					    (lambda (tran) (eval tran))
-					    )
-	sb-ext:*exit-hooks* (push
-			     (lambda () (clobber:close-transaction-log *log*))
-			     sb-ext:*exit-hooks*))
+  (setf *log* (clobber:open-transaction-log "arele.log" (lambda (tran) (eval tran)))
+	sb-ext:*exit-hooks* (push (lambda () (clobber:close-transaction-log *log*)) sb-ext:*exit-hooks*))
   (mito:connect-toplevel :sqlite3 :database-name "arele.db")
-;  (mapc (lambda (model)
-;	  (ensure-table-exists model)
-;	  )
-;	'(investor item purchase listing sale remittance)
-;	)
+  (mapc (lambda (model) t)
+	'(investor item purchase listing sale remittance)
+	)
   )
 
 (defun add-investor (&key name percentage)

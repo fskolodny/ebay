@@ -1,8 +1,9 @@
-(defpackage #:arele
+(uiop:define-package #:arele
   (:use #:cl
 	#:clog
 	#:clog-gui
 	#:clobber
+	#:json
 	#:local-time
 	)
   )
@@ -11,23 +12,24 @@
 
 (export '(start-app get-ebay-authorization-code *acceptor*))
 (shadow '(initialize-models
-	   add-investor add-inventory-item add-listing add-purchase add-remittance add-sale
-	   get-investors get-items get-listings get-purchases get-remittances get-sales
-	   get-investor get-listing get-sale
-	   get-purchases-for-investor
-	   get-listings-for-purchase
-	   get-sales-for-listing
-	   update-shipping
-	   object-id
-	   investor-name investor-percentage
-	   item-code item-description
-	   purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand purchase-price
-	   listing-purchase listing-date listing-quantity listing-price
-	   sale-listing sale-date sale-quantity sale-price sale-fees sale-shipping sale-customer
-	   remittance-investor remittance-date remittance-amount
-	   get-total-remittances-for-investor
-	   execute))
-(use-package '(models))
+	  add-investor add-inventory-item add-listing add-purchase add-remittance add-sale
+	  get-investors get-items get-listings get-purchases get-remittances get-sales
+	  get-investor get-listing get-sale
+	  get-purchases-for-investor
+	  get-listings-for-purchase
+	  get-sales-for-listing
+	  update-shipping
+	  object-id
+	  investor-name investor-percentage
+	  item-code item-description
+	  purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand purchase-price
+	  listing-purchase listing-date listing-quantity listing-price
+	  sale-listing sale-date sale-quantity sale-price sale-fees sale-shipping sale-customer
+	  remittance-investor remittance-date remittance-amount
+	  get-total-remittances-for-investor
+	  execute multiply iterate for in
+	  ))
+(use-package '(models iterate))
 
 (defvar *acceptor* (make-instance 'hunchentoot:easy-ssl-acceptor :port 8080 :ssl-privatekey-password "abcd" :ssl-privatekey-file #p"~/desktop.com.key" :ssl-certificate-file #p"~/desktop.com.crt"))
 
@@ -35,21 +37,22 @@
   code
   expiration
   )
+(defvar *current-auth* nil "Current authorization")
 (defvar *authorizations* `((:sandbox ((:authorize-url "https://auth.sandbox.ebay.com/oauth2/authorize?client_id=FilaKolo-SellingF-SBX-a755ec4ee-0182f5cf&response_type=code&redirect_uri=Fila_Kolodny-FilaKolo-Sellin-drmiwop&scope=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.order.readonly https://api.ebay.com/oauth/api_scope/buy.guest.order https://api.ebay.com/oauth/api_scope/sell.marketing.readonly https://api.ebay.com/oauth/api_scope/sell.marketing https://api.ebay.com/oauth/api_scope/sell.inventory.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.analytics.readonly https://api.ebay.com/oauth/api_scope/sell.marketplace.insights.readonly https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly https://api.ebay.com/oauth/api_scope/buy.shopping.cart https://api.ebay.com/oauth/api_scope/buy.offer.auction https://api.ebay.com/oauth/api_scope/commerce.identity.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.email.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.phone.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.address.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.name.readonly https://api.ebay.com/oauth/api_scope/commerce.identity.status.readonly https://api.ebay.com/oauth/api_scope/sell.finances https://api.ebay.com/oauth/api_scope/sell.item.draft https://api.ebay.com/oauth/api_scope/sell.payment.dispute https://api.ebay.com/oauth/api_scope/sell.item https://api.ebay.com/oauth/api_scope/sell.reputation https://api.ebay.com/oauth/api_scope/sell.reputation.readonly https://api.ebay.com/oauth/api_scope/commerce.notification.subscription https://api.ebay.com/oauth/api_scope/commerce.notification.subscription.readonly")
 				      ,(list :consent-code) ,(list :refresh-code) ,(list :auth-code)
-				      (:exchange-url . "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
-				      (:refresh-url . "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
-				      (:app-id . "FilaKolo-SellingF-SBX-a755ec4ee-0182f5cf")
-				      (:secret . "SBX-755ec4ee910c-fae8-40c5-af55-5436")
-				      (:redirect-uri . "Fila_Kolodny-FilaKolo-Sellin-drmiwop")
+				      (:exchange-url "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
+				      (:refresh-url "https://api.sandbox.ebay.com/identity/v1/oauth2/token")
+				      (:app-id "FilaKolo-SellingF-SBX-a755ec4ee-0182f5cf")
+				      (:secret "SBX-755ec4ee910c-fae8-40c5-af55-5436")
+				      (:redirect-uri "Fila_Kolodny-FilaKolo-Sellin-drmiwop")
 				      ))
 			   (:production ((:authorize-url "https://auth.ebay.com/oauth2/authorize?client_id=FilaKolo-SellingF-PRD-f75719fb7-f015cf08&response_type=code&redirect_uri=Fila_Kolodny-FilaKolo-Sellin-wtzukf&scope=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.marketing.readonly https://api.ebay.com/oauth/api_scope/sell.marketing https://api.ebay.com/oauth/api_scope/sell.inventory.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.analytics.readonly https://api.ebay.com/oauth/api_scope/sell.finances https://api.ebay.com/oauth/api_scope/sell.payment.dispute https://api.ebay.com/oauth/api_scope/commerce.identity.readonly https://api.ebay.com/oauth/api_scope/commerce.notification.subscription https://api.ebay.com/oauth/api_scope/commerce.notification.subscription.readonly")
 					 ,(list :consent-code) ,(list :refresh-code) ,(list :auth-code)
-					 (:exchange-url . "https://api.ebay.com/identity/v1/oauth2/token")
-					 (:refresh-url . "https://api.ebay.com/identity/v1/oauth2/token")
-					 (:app-id . "FilaKolo-SellingF-PRD-f75719fb7-f015cf08")
-					 (:secret . "PRD-75719fb72196-9187-48f7-8d79-92cd")
-					 (:redirect-uri . "Fila_Kolodny-FilaKolo-Sellin-wtzukf")
+					 (:exchange-url "https://api.ebay.com/identity/v1/oauth2/token")
+					 (:refresh-url "https://api.ebay.com/identity/v1/oauth2/token")
+					 (:app-id "FilaKolo-SellingF-PRD-f75719fb7-f015cf08")
+					 (:secret "PRD-75719fb72196-9187-48f7-8d79-92cd")
+					 (:redirect-uri "Fila_Kolodny-FilaKolo-Sellin-wtzukf")
 					 ))
 			   )
   )
@@ -794,6 +797,7 @@
 				      (gui-menu-item (:content "Purchases List" :on-click 'on-purchases-list))
 				      (gui-menu-item (:content "Listings List" :on-click 'on-listings-list))
 				      (gui-menu-item (:content "Sales List" :on-click 'on-sales-list))
+				      (gui-menu-item (:content "EBay inventory" :on-click 'on-ebay-inventory))
 				      )
 		  (gui-menu-drop-down (:content "Help")
 				      (gui-menu-item (:content "About" :on-click 'on-help-about))
@@ -803,53 +807,157 @@
       )
     )
   )
-(defun get-ebay-authorization-code (&key (sandbox t))
-  (let ((auth (second (assoc (if sandbox :sandbox :production) *authorizations*)))
+(defvar *dl*)
+(defvar *ul*)
+(defun on-ebay-inventory (obj)
+  (let* ((win (create-gui-window obj :maximize t :title "EBay inventory"))
+	 (panel (create-div (window-content win)))
+	 (json-obj (get-ebay-inventory-items))
 	)
-    (print auth)
-    (terpri)
-    (finish-output)
-    (hunchentoot:define-easy-handler
-	(accept-authorization :uri (lambda (&rest args)
-				     (declare (ignorable args))
-				     t
-				     ))
-	(code (expires-in :real-name "expires_in" :parameter-type 'integer))
-      (format t "code=~a expires-in=~a" code expires-in)
-      (terpri)
-      (setf (cdr (assoc :consent-code auth)) (make-auth-code :code code :expiration (timestamp+ (now) expires-in :sec)))
-      (multiple-value-bind (body status headers uri stream)
-	  (dexador:post (cdr (assoc :exchange-url auth))
-			:basic-auth `(,(cdr (assoc :app-id auth)) . ,(cdr (assoc :secret auth)))
-			:content `(("grant_type" . "authorization_code")
-				   ("redirect_uri" . ,(cdr (assoc :redirect-uri auth)))
-				   ("code" . ,(quri:url-decode code))
-				   )
+    (with-clog-create panel
+	(definition-list (:bind dl))
+      (let ((*dl* dl))
+	(labels ((field-to-definition (field)
+		   (let ((term (create-term *dl* :content (first field)))
+			 (desc (create-description *dl*))
+			 (val (second field))
+			 )
+		     (declare (ignore term))
+		     (etypecase val
+		       (json-object
+			(let ((*dl* (create-definition-list desc))
+			      )
+			  (setf (attribute *dl* :compact) t)
+			  (mapc #'field-to-definition (json-object-members val))
+			  )
 			)
-	(declare (ignorable uri stream))
-	(let ((*print-pretty* t)
-	      (json-obj (json:json-decode body))
-	      )
-	  (print status)
-	  (print (alexandria:hash-table-alist headers))
-	  (print body)
-	  (terpri)
-	  (finish-output)
-	  (setf (cdr (assoc :auth-code auth)) (make-auth-code :code (json:json-getf json-obj "access_token") :expiration (timestamp+ (now) (json:json-getf json-obj "expires_in") :sec))
-		(cdr (assoc :refresh-code auth)) (make-auth-code :code (json:json-getf json-obj "refresh_token") :expiration (timestamp+ (now) (json:json-getf json-obj "refresh_token_expires_in") :sec))
-		)
+		       (list
+			(with-clog-create desc
+			    (ordered-list (:bind ul))
+			  (let ((*ul* ul))
+			    (setf (attribute *ul* :compact) t)
+			    (mapc #'item-to-list-item val)
+			    )
+			  )
+			)
+		       (t
+			(setf (text desc) val)
+			)
+		       )
+		     )
+		   )
+		 (item-to-list-item (item)
+		   (with-clog-create *ul*
+		       (list-item (:bind li))
+		     (etypecase item
+		       (list
+			(with-clog-create li
+			    (ordered-list (:bind ul))
+			  (let ((*ul* ul))
+			    (setf (attribute *ul* :compact) t)
+			    (mapc #'item-to-list-item item)
+			    )
+			  )
+			)
+		       (json-object
+			(with-clog-create li
+			    (definition-list (:bind dl))
+			  (let ((*dl* dl))
+			    (setf (attribute *dl* :compact) t)
+			    (mapc #'field-to-definition (json-object-members item))
+			    )
+			  )
+			)
+		       (t
+			(setf (text li) item)
+			)
+		       )
+		     )
+		   )
+		 )
+	  (setf (attribute *dl* :compact) t)
+	  (mapc #'field-to-definition (json-object-members json-obj))
 	  )
 	)
-      "<body><h3>You can close this window</h3></body>"
       )
-    (hunchentoot:start *acceptor*)
-    (uiop:run-program (format nil "xdg-open '~a'" (second (assoc :authorize-url auth))))
     )
+  )
+(defun refresh-ebay-auth-code ()
+  (multiple-value-bind (body status headers uri stream)
+      (dexador:get (second (assoc :refresh-url *current-auth*))
+		   :basic-auth `(,(second (assoc :app-id *current-auth*)) . ,(second (assoc :secret *current-auth*)))
+		   :content `(("grant_type" . "refresh_token")
+			      ("refresh_token" . ,(auth-code-code (cdr (assoc :refresh-code *current-auth*))))
+			      )
+		   )
+    (declare (ignore headers uri stream))
+    (let ((json-obj (json-decode body))
+	  )
+      (print status)
+      (finish-output)
+      (setf (cdr (assoc :auth-code *current-auth*)) (make-auth-code :code (json-getf json-obj "access_token") :expiration (timestamp+ (now) (json-getf json-obj "expires_in") :sec)))
+      )
+    )
+  )
+(defun get-ebay-inventory-items (&key (sandbox t))
+  (if (or (null *current-auth*) (null (cdr (assoc :auth-code *current-auth*))))
+      (get-ebay-authorization-code :sandbox sandbox))
+  (let ((auth-code (cdr (assoc :auth-code *current-auth*)))
+	)
+    (if (timestamp> (now) (auth-code-expiration auth-code))
+	(setf auth-code (refresh-ebay-auth-code))
+	)
+    (multiple-value-bind (body status headers uri stream)
+	(dexador:get (format nil "https://~a/sell/inventory/v1/inventory_item" (if sandbox "api.sandbox.ebay.com" "api.ebay.com"))
+		     :headers `((authorization . ,(format nil "Bearer ~a" (auth-code-code auth-code)))
+				)
+		     )
+      (declare (ignorable body status headers uri stream))
+      (print status)
+      (terpri)
+      (let ((json-obj (json-decode body))
+	    )
+	json-obj
+	)
+      )
+    )
+  )
+
+(defun get-ebay-authorization-code (&key (sandbox t))
+  (setf *current-auth* (second (assoc (if sandbox :sandbox :production) *authorizations*)))
+  (hunchentoot:define-easy-handler
+      (accept-authorization :uri (lambda (&rest args) (declare (ignorable args)) t))
+      (code (expires-in :real-name "expires_in" :parameter-type 'integer))
+    (setf (cdr (assoc :consent-code *current-auth*)) (make-auth-code :code code :expiration (timestamp+ (now) expires-in :sec)))
+    (multiple-value-bind (body status headers uri stream)
+	(dexador:post (second (assoc :exchange-url *current-auth*))
+		      :basic-auth `(,(second (assoc :app-id *current-auth*)) . ,(second (assoc :secret *current-auth*)))
+		      :content `(("grant_type" . "authorization_code")
+				 ("redirect_uri" . ,(second (assoc :redirect-uri *current-auth*)))
+				 ("code" . ,(quri:url-decode code))
+				 )
+		      )
+      (declare (ignorable status headers uri stream))
+      (let ((*print-pretty* t)
+	    (json-obj (json-decode body))
+	    )
+	(setf (cdr (assoc :auth-code *current-auth*)) (make-auth-code :code (json-getf json-obj "access_token")
+								      :expiration (timestamp+ (now) (json-getf json-obj "expires_in") :sec))
+	      (cdr (assoc :refresh-code *current-auth*)) (make-auth-code :code (json-getf json-obj "refresh_token")
+									 :expiration (timestamp+ (now) (json-getf json-obj "refresh_token_expires_in") :sec))
+	      )
+	)
+      )
+    "<body><h3>You can close this window</h3></body>"
+    )
+  (hunchentoot:start *acceptor*)
+  (uiop:run-program (format nil "xdg-open '~a'" (second (assoc :authorize-url *current-auth*))))
   )
 
 (defun start-app ()
   (models:initialize-models)
   (initialize 'on-new-window
+	      :port 8081
 	      :static-root (merge-pathnames "./www/"
 					    (asdf:system-source-directory :arele)))
   (open-browser)
@@ -872,5 +980,6 @@
 		     a))
 	(purchase-items (mito:retrieve-by-sql (sxql:select (sxql:fields :investor_id :date) (sxql:from :purchases))))
 	)
+    (declare (ignorable investors inventory purchases purchase-items))
     )
   )
