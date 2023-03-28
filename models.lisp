@@ -3,22 +3,23 @@
   (:use #:cl
 	)
   (:export initialize-models
-	   add-investor add-inventory-item add-listing add-purchase add-remittance add-sale
-	   get-investors get-items get-listings get-purchases get-remittances get-sales
+	   add-investor add-inventory-item add-listing add-purchase add-remittance add-sale add-purchase-item
+	   get-investors get-items get-listings get-purchases get-remittances get-sales get-purchase-items
+	   get-inventory-item
 	   get-investor get-listing get-sale
 	   get-purchases-for-investor
 	   get-listings-for-purchase
 	   get-sales-for-listing
 	   update-shipping
 	   object-id
-	   investor-name investor-percentage
+	   investor-name investor-percentage investor-purchases
 	   item-code item-description
-	   purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand purchase-price
+	   purchase-investor purchase-item purchase-date purchase-quantity purchase-on-hand
+	   purchase-price purchase-items
 	   listing-purchase listing-date listing-quantity listing-price
 	   sale-listing sale-date sale-quantity sale-price sale-fees sale-shipping sale-customer
 	   remittance-investor remittance-date remittance-amount
 	   get-total-remittances-for-investor
-	   execute
 	   )
   )
 
@@ -33,45 +34,60 @@
 (defvar *sales* nil)
 (defvar *remittances* nil)
 
-(defun execute (function &rest args)
-  (eval (cons function args))
-  (clobber:log-transaction (cons function args) *log*)
-  )
 (defclass investor ()
   ((name :type string :accessor investor-name :initarg :name)
    (percentage :type integer :accessor investor-percentage :initarg :percentage)
-   (purchases :type list :accessor investor-purchases :initform (list))
+   (purchases :type list :accessor investor-purchases :initform (list) :initarg :purchases)
    )
+  )
+(defmethod print-object ((investor investor) stream)
+  (print-unreadable-object (investor stream)
+    (format stream ":name ~a :percentage ~a" (investor-name investor) (investor-percentage investor))
+    )
   )
 
 (defclass item ()
   ((code :type string :accessor item-code :initarg :code)
    (description :type string :accessor item-description :initarg :description)
-   (purchases :type list :accessor item-purchases :initform (list))
+   (purchases :type list :accessor item-purchases :initform (list) :initarg :purchases)
+   (listings :type list :accessor item-listings :initform (list) :initarg :listings)
    )
   )
 
 (defclass purchase ()
   ((investor :type investor :accessor purchase-investor :initarg :investor)
    (date :type date :accessor purchase-date :initarg :date)
+   (items :type list :accessor purchase-items :initform (list) :initarg :items)
    )
   )
+(defmethod print-object ((purchase purchase) stream)
+  (print-unreadable-object (purchase stream)
+    (format stream ":date ~a ~(~a~)" (purchase-date purchase) (purchase-items purchase))
+    )
+  )
+
 (defclass purchase-item ()
-  (
-   (item :type item :accessor purchase-item :initarg :item)
-   (quantity :type :integer :accessor purchase-quantity :initarg :quantity)
-   (on-hand :type :integer :accessor purchase-on-hand :initarg :on-hand)
+  ((item :type item :accessor purchase-item :initarg :item)
+   (quantity :type integer :accessor purchase-quantity :initarg :quantity)
+   (on-hand :type integer :accessor purchase-on-hand :initarg :on-hand)
    (price :type rational :accessor purchase-price :initarg :price)
+   (purchase :type purchase :accessor purchase-item-purchase :initarg :purchase)
+   (sales :type list :accessor purchase-item-sales :initarg :sales)
    )
+  )
+(defmethod print-object ((purchase-item purchase-item) stream)
+  (print-unreadable-object (purchase-item stream)
+    (format stream ":item ~a :quantity ~a :price ~a" (purchase-item purchase-item) (purchase-quantity purchase-item) (purchase-price purchase-item))
+    )
   )
 
 (defclass listing ()
-  ((item :type item :accessor listing-item :initarg :item)
-   (date :type :date :accessor listing-date :initarg :date)
-   (quantity :type integer :accessor listing-quantity :initarg :quantity)
-   (price :type rational :accessor listing-price :initarg :price)
+   ((item :type item :accessor listing-item :initarg :item)
+    (date :type :date :accessor listing-date :initarg :date)
+    (quantity :type integer :accessor listing-quantity :initarg :quantity)
+    (price :type rational :accessor listing-price :initarg :price)
+    )
    )
-  )
 
 (defclass sale ()
   ((listing :type listing :accessor sale-listing :initarg :listing)
@@ -81,7 +97,7 @@
    (fees :type rational :accessor sale-fees :initarg :fees)
    (shipping :type rational :accessor sale-shipping :initarg :shipping)
    (customer :type string :accessor sale-customer :initarg :customer)
-   (purchases :type list :accessor sale-purchases :initform (list))
+   (purchases :type list :accessor sale-purchases :initform (list) :initarg :purchases)
    )
   )
 
@@ -92,30 +108,55 @@
    )
   )
 
+(defmethod make-uplink ((purchase purchase) (investor investor))
+  (setf (purchase-investor purchase) investor)
+  )
+(defmethod make-uplink ((pitem purchase-item) (purchase purchase))
+  (setf (purchase-item-purchase pitem) purchase)
+  )
+(defmethod make-uplink ((pitem purchase-item) (item item))
+  (setf (purchase-item pitem) item)
+  )
+
 (defun initialize-models ()
-  (setf *log* (clobber:open-transaction-log "arele.log" (lambda (tran) (eval tran)))
-	sb-ext:*exit-hooks* (push (lambda () (clobber:close-transaction-log *log*)) sb-ext:*exit-hooks*))
   (mito:connect-toplevel :sqlite3 :database-name "arele.db")
-  (mapc (lambda (model) t)
-	'(investor item purchase listing sale remittance)
-	)
   )
 
 (defun add-investor (&key name percentage)
-  (setf *investors* (append *investors* (list (make-instance 'investor :name name :percentage percentage))))
+  (let ((investor (make-instance 'investor :name name :percentage percentage))
+	)
+    (setf *investors* (append *investors* (list investor)))
+    investor
+    )
   )
 
 (defun add-inventory-item (&key code description &allow-other-keys)
-  (setf *items* (append *items* (list (make-instance 'item :code code :description description))))
+  (let ((item (make-instance 'item :code code :description description))
+	)
+    (setf *items* (append *items* (list item)))
+    item
+    )
   )
 
 (defun add-purchase (&key date investor &allow-other-keys)
-  (setf *purchases* (append *purchases* (list (make-instance 'purchase :date date :investor (nth (1- investor) *investors*)))))
+  (let ((purchase (make-instance 'purchase :date date :investor investor))
+	)
+    (setf *purchases* (append *purchases* (list purchase))
+	  (investor-purchases investor) (append (investor-purchases investor) (list purchase))
+	  )
+    purchase
+    )
   )
 
 (defun add-purchase-item (&key purchase item quantity price &allow-other-keys)
-  (setf *purchase-items* (append *purchase-items* (list (make-instance 'purchase-item :purchase purchase :item (nth (1- item) *items*)
-										      :quantity quantity :price price))))
+  (let ((purchase-item (make-instance 'purchase-item :purchase purchase :item item :quantity quantity :price price))
+	)
+    (setf *purchase-items* (append *purchase-items* (list purchase-item))
+	  (purchase-items purchase) (append (purchase-items purchase) (list purchase-item))
+	  (item-purchases item) (append (item-purchases item) (list purchase-item))
+	  )
+    purchase-item
+    )
   )
 
 (defun add-listing (&key item date quantity price)
@@ -143,6 +184,10 @@
   *items*
   )
 
+(defun get-purchase-items ()
+  *purchase-items*
+  )
+
 (defun get-listings ()
   *listings*
   )
@@ -156,7 +201,15 @@
   )
 
 (defun get-investor (id)
-  (nth (1- id) *investors*)
+  (or (and (integerp id) (nth (1- id) *investors*)) id)
+  )
+
+(defun get-inventory-item (id)
+  (nth (1- id) *items*)
+  )
+
+(defun get-purchase (id)
+  (nth (1- id) *purchases*)
   )
 
 (defun get-listing (id)

@@ -7,6 +7,7 @@
   :serial t
   :entry-point "arele:start-app"
   :depends-on (
+	       #:cl-who
 	       #:clog
 	       #:clobber
 	       #:dexador
